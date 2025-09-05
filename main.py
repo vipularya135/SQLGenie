@@ -1,8 +1,79 @@
+# ...existing code...
+def ai_rephrase_question(query: str, correction_history: list) -> str:
+    """Use Gemini or MCP to rephrase a question that failed multiple correction attempts"""
+    # Summarize the correction attempts
+    attempts_summary = ""
+    for i, correction in enumerate(correction_history):
+        attempts_summary += f"Attempt {i+1}: {correction.get('error', 'Unknown error')}\n"
+
+    prompt = f"""You are a helpful database assistant. The user asked a question that couldn't be answered due to technical issues. Please rephrase their question in a simpler, clearer way that would be easier to answer.
+
+Original Question: {query}
+
+Issues encountered:
+{attempts_summary}
+
+Database Schema (SQLite Sakila):
+- actor, address, category, city, country, customer, film, film_actor, film_category, film_text, inventory, language, payment, rental, staff, store
+
+Please provide 2-3 alternative ways to ask the same question, but simpler and more specific. Focus on:
+1. Breaking complex questions into simpler parts
+2. Using clearer, more specific language
+3. Asking for one thing at a time instead of multiple things
+
+Return the rephrased questions in this format:
+1. [First rephrased question]
+2. [Second rephrased question]
+3. [Third rephrased question]
+
+Rephrased Questions:"""
+
+    try:
+        if USE_MCP:
+            rephrased = call_mcp(prompt).strip()
+        else:
+            rephrased = call_gemini_with_retry(prompt).strip()
+        # Clean up the response
+        if rephrased.startswith('```'):
+            rephrased = rephrased.split('\n')[1:-1]
+            rephrased = '\n'.join(rephrased)
+        return rephrased.strip()
+    except Exception as e:
+        return None
 from fastapi import FastAPI
 from pydantic import BaseModel
 import sqlite3
 import google.generativeai as genai
 import os
+def get_mcp_llm():
+    if MCP_API_KEY:
+        return OpenAI(openai_api_key=MCP_API_KEY, temperature=0)
+    else:
+        return OpenAI(temperature=0)
+
+# MCP/LangChain equivalents
+def call_mcp(prompt: str) -> str:
+    llm = get_mcp_llm()
+    return llm(prompt)
+# MCP/LangChain config
+USE_MCP = os.environ.get('USE_MCP', 'false').lower() == 'true'
+MCP_API_KEY = os.environ.get('OPENAI_API_KEY', None)
+
+# Initialize LangChain MCP (OpenAI)
+def get_mcp_llm():
+    if MCP_API_KEY:
+        return OpenAI(openai_api_key=MCP_API_KEY, temperature=0)
+    else:
+        return OpenAI(temperature=0)
+
+
+# MCP/LangChain imports
+from langchain.llms import OpenAI
+from langchain.prompts import PromptTemplate
+
+# MCP/LangChain config
+USE_MCP = os.environ.get('USE_MCP', 'false').lower() == 'true'
+MCP_API_KEY = os.environ.get('OPENAI_API_KEY', None)
 
 # Path to the existing SQLite DB
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sakila.db')
@@ -157,7 +228,10 @@ def strip_code_fences(text: str) -> str:
 
 def to_sql(nl_query: str) -> str:
     prompt = f"{SYSTEM_PROMPT}\n{SCHEMA_HINT}\n{FEW_SHOT}\nNL: {nl_query}\nSQL:"
-    text = call_gemini_with_retry(prompt)
+    if USE_MCP:
+        text = call_mcp(prompt)
+    else:
+        text = call_gemini_with_retry(prompt)
     text = strip_code_fences(text)
     return text.rstrip(' ;')
 
@@ -182,14 +256,17 @@ Results: {data_summary}
 Please provide a clear, concise explanation of what the results mean in the context of the original question. Focus on insights and patterns in the data. Keep it under 100 words."""
 
     try:
-        return call_gemini_with_retry(prompt)
+        if USE_MCP:
+            return call_mcp(prompt)
+        else:
+            return call_gemini_with_retry(prompt)
     except Exception as e:
         return f"Error generating explanation: {str(e)}"
 
 
 def ai_correct_sql_error(query: str, sql: str, error_msg: str, attempt: int = 1) -> str:
     """Use Gemini AI to correct SQL errors"""
-    
+
     prompt = f"""You are a SQL expert. Fix the SQL query that has an error.
 
 Original Question: {query}
@@ -198,88 +275,24 @@ Error Message: {error_msg}
 Attempt Number: {attempt}
 
 Database Schema (SQLite Sakila):
-- actor(actor_id, first_name, last_name, last_update)
-- address(address_id, address, address2, district, city_id, postal_code, phone, last_update)
-- category(category_id, name, last_update)
-- city(city_id, city, country_id, last_update)
-- country(country_id, country, last_update)
-- customer(customer_id, store_id, first_name, last_name, email, address_id, active, create_date, last_update)
-- film(film_id, title, description, release_year, language_id, original_language_id, rental_duration, rental_rate, length, replacement_cost, rating, special_features, last_update)
-- film_actor(actor_id, film_id, last_update)
-- film_category(film_id, category_id, last_update)
-- film_text(film_id, title, description)
-- inventory(inventory_id, film_id, store_id, last_update)
-- language(language_id, name, last_update)
-- payment(payment_id, customer_id, staff_id, rental_id, amount, payment_date, last_update)
-- rental(rental_id, rental_date, inventory_id, customer_id, return_date, staff_id, last_update)
-- staff(staff_id, first_name, last_name, address_id, picture, email, store_id, active, username, password, last_update)
-- store(store_id, manager_staff_id, address_id, last_update)
 
 Rules:
-- Return ONLY the corrected SQL query, no explanations
-- Use proper SQLite syntax
-- For complex queries, break them into simpler parts
-- Use single quotes for string literals
-- Ensure all table and column names exist in the schema
-- For counting tables, use: SELECT COUNT(*) FROM sqlite_master WHERE type='table'
-- For table row counts, use UNION ALL with individual table counts
 
 Corrected SQL:"""
-
     try:
-        corrected_sql = call_gemini_with_retry(prompt).strip()
-        
-        # Clean up the response
+        if USE_MCP:
+            corrected_sql = call_mcp(prompt).strip()
+        else:
+            corrected_sql = call_gemini_with_retry(prompt).strip()
         if corrected_sql.startswith('```'):
             corrected_sql = corrected_sql.split('\n')[1:-1]
             corrected_sql = '\n'.join(corrected_sql)
-        
         return corrected_sql.strip()
     except Exception as e:
         return None
 
 
-def ai_rephrase_question(query: str, correction_history: list) -> str:
-    """Use Gemini AI to rephrase a question that failed multiple correction attempts"""
-    
-    # Summarize the correction attempts
-    attempts_summary = ""
-    for i, correction in enumerate(correction_history):
-        attempts_summary += f"Attempt {i+1}: {correction.get('error', 'Unknown error')}\n"
-    
-    prompt = f"""You are a helpful database assistant. The user asked a question that couldn't be answered due to technical issues. Please rephrase their question in a simpler, clearer way that would be easier to answer.
 
-Original Question: {query}
-
-Issues encountered:
-{attempts_summary}
-
-Database Schema (SQLite Sakila):
-- actor, address, category, city, country, customer, film, film_actor, film_category, film_text, inventory, language, payment, rental, staff, store
-
-Please provide 2-3 alternative ways to ask the same question, but simpler and more specific. Focus on:
-1. Breaking complex questions into simpler parts
-2. Using clearer, more specific language
-3. Asking for one thing at a time instead of multiple things
-
-Return the rephrased questions in this format:
-1. [First rephrased question]
-2. [Second rephrased question]  
-3. [Third rephrased question]
-
-Rephrased Questions:"""
-
-    try:
-        rephrased = call_gemini_with_retry(prompt).strip()
-        
-        # Clean up the response
-        if rephrased.startswith('```'):
-            rephrased = rephrased.split('\n')[1:-1]
-            rephrased = '\n'.join(rephrased)
-        
-        return rephrased.strip()
-    except Exception as e:
-        return None
 
 
 def run_sql(sql: str):
@@ -297,42 +310,51 @@ def run_sql(sql: str):
 @app.post('/query')
 async def query(nl: QueryIn):
     """AI-powered query processing with automatic error correction and retry logic"""
+
+    # Special handling for compound table/row count questions
+    q_lower = nl.query.lower()
+    if ("table" in q_lower and ("count" in q_lower or "row" in q_lower)) and ("total" in q_lower or "each" in q_lower):
+        # Run two queries and combine results
+        total_tables_sql = "SELECT COUNT(*) as total_tables FROM sqlite_master WHERE type='table'"
+        row_counts_sql = "SELECT 'actor' AS table_name, COUNT(*) AS row_count FROM actor UNION ALL SELECT 'address', COUNT(*) FROM address UNION ALL SELECT 'category', COUNT(*) FROM category UNION ALL SELECT 'city', COUNT(*) FROM city UNION ALL SELECT 'country', COUNT(*) FROM country UNION ALL SELECT 'customer', COUNT(*) FROM customer UNION ALL SELECT 'film', COUNT(*) FROM film UNION ALL SELECT 'film_actor', COUNT(*) FROM film_actor UNION ALL SELECT 'film_category', COUNT(*) FROM film_category UNION ALL SELECT 'film_text', COUNT(*) FROM film_text UNION ALL SELECT 'inventory', COUNT(*) FROM inventory UNION ALL SELECT 'language', COUNT(*) FROM language UNION ALL SELECT 'payment', COUNT(*) FROM payment UNION ALL SELECT 'rental', COUNT(*) FROM rental UNION ALL SELECT 'staff', COUNT(*) FROM staff UNION ALL SELECT 'store', COUNT(*) FROM store"
+        total_tables_result = run_sql(total_tables_sql)
+        row_counts_result = run_sql(row_counts_sql)
+        return {
+            "sql": f"{total_tables_sql};\n{row_counts_sql}",
+            "total_tables": total_tables_result.get("rows", []),
+            "row_counts": row_counts_result.get("rows", []),
+            "explanation": "This combines the total number of tables and the row count for each table in the Sakila database.",
+        }
+
+    # ...existing code...
     max_attempts = 3
     current_sql = to_sql(nl.query)
     original_sql = current_sql
     correction_history = []
-    
     # Check safety first
     if not is_safe_sql(current_sql):
         return {"error": "This query contains unsafe operations and cannot be executed.", "sql": current_sql}
-    
     for attempt in range(1, max_attempts + 1):
         try:
             # Try to execute the current SQL
             result = run_sql(current_sql)
-            
             # If successful, generate explanation and return
             explanation = generate_explanation(nl.query, current_sql, result.get("rows", []))
             result["explanation"] = explanation
             result["sql"] = current_sql
-            
             # Add correction info if any corrections were made
             if correction_history:
                 result["ai_corrected"] = True
                 result["correction_attempts"] = len(correction_history)
                 result["original_sql"] = original_sql
                 result["correction_history"] = correction_history
-            
             return result
-            
         except Exception as e:
             error_msg = str(e)
-            
             # If this is the last attempt, try to rephrase the question
             if attempt == max_attempts:
                 # Try to get AI-suggested rephrased questions
                 rephrased_questions = ai_rephrase_question(nl.query, correction_history)
-                
                 return {
                     "error": "Unable to execute the query after multiple correction attempts.",
                     "sql": current_sql,
@@ -343,10 +365,8 @@ async def query(nl: QueryIn):
                     "suggested_questions": rephrased_questions,
                     "show_suggestions": True
                 }
-            
             # Use AI to correct the SQL error
             corrected_sql = ai_correct_sql_error(nl.query, current_sql, error_msg, attempt)
-            
             if corrected_sql and corrected_sql != current_sql:
                 # Record the correction
                 correction_history.append({
@@ -364,7 +384,6 @@ async def query(nl: QueryIn):
                         current_sql = "SELECT COUNT(*) as total_tables FROM sqlite_master WHERE type='table'"
                     else:
                         current_sql = "SELECT 'actor' AS table_name, COUNT(*) AS row_count FROM actor UNION ALL SELECT 'address', COUNT(*) FROM address UNION ALL SELECT 'category', COUNT(*) FROM category UNION ALL SELECT 'city', COUNT(*) FROM city UNION ALL SELECT 'country', COUNT(*) FROM country UNION ALL SELECT 'customer', COUNT(*) FROM customer UNION ALL SELECT 'film', COUNT(*) FROM film UNION ALL SELECT 'film_actor', COUNT(*) FROM film_actor UNION ALL SELECT 'film_category', COUNT(*) FROM film_category UNION ALL SELECT 'film_text', COUNT(*) FROM film_text UNION ALL SELECT 'inventory', COUNT(*) FROM inventory UNION ALL SELECT 'language', COUNT(*) FROM language UNION ALL SELECT 'payment', COUNT(*) FROM payment UNION ALL SELECT 'rental', COUNT(*) FROM rental UNION ALL SELECT 'staff', COUNT(*) FROM staff UNION ALL SELECT 'store', COUNT(*) FROM store"
-                    
                     correction_history.append({
                         "attempt": attempt,
                         "error": error_msg,
@@ -382,6 +401,5 @@ async def query(nl: QueryIn):
                         "corrected_sql": current_sql,
                         "fallback_used": True
                     })
-    
     # This should never be reached, but just in case
     return {"error": "Unexpected error in query processing", "sql": current_sql}

@@ -155,7 +155,15 @@ if st.session_state.history:
 			if "explanation" in latest:
 				st.subheader("📊 Results Explanation")
 				st.info(latest.get("explanation"))
-			
+
+			# Show total_tables and row_counts if present
+			if "total_tables" in latest:
+				st.subheader("Total Number of Tables")
+				st.dataframe(latest["total_tables"], use_container_width=True)
+			if "row_counts" in latest:
+				st.subheader("Row Counts for Each Table")
+				st.dataframe(latest["row_counts"], use_container_width=True)
+
 			rows = latest.get("rows", [])
 			if rows:
 				st.success(f"{len(rows)} row(s)")
@@ -169,7 +177,7 @@ if st.session_state.history:
 					st.download_button("📥 Download CSV", data=output.getvalue(), file_name="results.csv", mime="text/csv")
 				except Exception as e:
 					st.warning("CSV download temporarily unavailable.")
-			else:
+			elif not ("total_tables" in latest or "row_counts" in latest):
 				st.info("No rows returned.")
 	except Exception as e:
 		# If there's any error displaying results, show a friendly message
