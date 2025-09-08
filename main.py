@@ -1,6 +1,5 @@
-# ...existing code...
 def ai_rephrase_question(query: str, correction_history: list) -> str:
-    """Use Gemini or MCP to rephrase a question that failed multiple correction attempts"""
+    """Use MCP to rephrase a question that failed multiple correction attempts"""
     # Summarize the correction attempts
     attempts_summary = ""
     for i, correction in enumerate(correction_history):
