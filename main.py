@@ -40,7 +40,7 @@ def call_gemini_with_retry(prompt: str, max_retries: int = len(API_KEYS)) -> str
     """Call Gemini API with automatic key rotation on rate limits"""
     for attempt in range(max_retries):
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.0-flash')
             resp = model.generate_content(prompt)
             return resp.text or ''
         except Exception as e:
