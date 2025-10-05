@@ -1,11 +1,23 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import google.generativeai as genai
 import os
+import shutil
+import hashlib
+import json
+from pathlib import Path
+from typing import Optional, Dict, List
 
-# Path to the existing SQLite DB
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sakila.db')
+# Directory structure for database storage
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOADED_DBS_DIR = os.path.join(BASE_DIR, 'uploaded_databases')
+SCHEMA_CACHE_DIR = os.path.join(BASE_DIR, 'schema_cache')
+DEFAULT_DB_PATH = os.path.join(BASE_DIR, 'sakila.db')
+
+# Create directories if they don't exist
+os.makedirs(UPLOADED_DBS_DIR, exist_ok=True)
+os.makedirs(SCHEMA_CACHE_DIR, exist_ok=True)
 
 # Multiple Gemini API keys for rotation
 API_KEYS = [
@@ -61,6 +73,20 @@ app = FastAPI()
 
 class QueryIn(BaseModel):
     query: str
+    database_id: Optional[str] = None  # If None, use default Sakila DB
+
+class DatabaseInfo(BaseModel):
+    id: str
+    name: str
+    tables: List[str]
+    upload_date: str
+    file_size: int
+
+class DatabaseUploadResponse(BaseModel):
+    database_id: str
+    name: str
+    tables: List[str]
+    message: str
 
 SYSTEM_PROMPT = (
     "You write SQLite queries only. Return just the SQL. No commentary. "
@@ -113,6 +139,122 @@ FEW_SHOT = (
     "-- SQL: SELECT COUNT(*) as total_tables FROM sqlite_master WHERE type='table'\n"
 )
 
+def generate_database_id(filename: str, content: bytes) -> str:
+    """Generate a unique ID for a database based on filename and content hash"""
+    content_hash = hashlib.md5(content).hexdigest()[:8]
+    clean_name = Path(filename).stem.replace(' ', '_').replace('-', '_')
+    return f"{clean_name}_{content_hash}"
+
+def get_database_schema(db_path: str) -> Dict:
+    """Extract schema information from a SQLite database"""
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tables = [row[0] for row in cursor.fetchall()]
+        
+        # Get schema for each table
+        schema_info = {}
+        for table in tables:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = cursor.fetchall()
+            schema_info[table] = {
+                'columns': [{'name': col[1], 'type': col[2], 'notnull': col[3], 'pk': col[5]} for col in columns],
+                'row_count': 0
+            }
+            
+            # Get row count
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                schema_info[table]['row_count'] = cursor.fetchone()[0]
+            except:
+                schema_info[table]['row_count'] = 0
+        
+        return {
+            'tables': tables,
+            'schema': schema_info
+        }
+    finally:
+        conn.close()
+
+def save_database_info(db_id: str, db_name: str, schema_info: Dict):
+    """Save database schema information to cache"""
+    cache_file = os.path.join(SCHEMA_CACHE_DIR, f"{db_id}.json")
+    info = {
+        'id': db_id,
+        'name': db_name,
+        'schema_info': schema_info,
+        'upload_date': str(os.path.getctime(os.path.join(UPLOADED_DBS_DIR, f"{db_id}.db"))),
+        'file_size': os.path.getsize(os.path.join(UPLOADED_DBS_DIR, f"{db_id}.db"))
+    }
+    with open(cache_file, 'w') as f:
+        json.dump(info, f, indent=2)
+
+def load_database_info(db_id: str) -> Optional[Dict]:
+    """Load database information from cache"""
+    cache_file = os.path.join(SCHEMA_CACHE_DIR, f"{db_id}.json")
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    return None
+
+def get_database_path(db_id: Optional[str] = None) -> str:
+    """Get the path to a database file"""
+    if db_id is None:
+        return DEFAULT_DB_PATH
+    return os.path.join(UPLOADED_DBS_DIR, f"{db_id}.db")
+
+def list_uploaded_databases() -> List[DatabaseInfo]:
+    """List all uploaded databases"""
+    databases = []
+    for filename in os.listdir(SCHEMA_CACHE_DIR):
+        if filename.endswith('.json'):
+            db_id = filename[:-5]  # Remove .json extension
+            info = load_database_info(db_id)
+            if info:
+                databases.append(DatabaseInfo(
+                    id=info['id'],
+                    name=info['name'],
+                    tables=info['schema_info']['tables'],
+                    upload_date=info['upload_date'],
+                    file_size=info['file_size']
+                ))
+    return databases
+
+def validate_sqlite_file(file_content: bytes) -> bool:
+    """Validate if the uploaded file is a valid SQLite database"""
+    # SQLite files start with "SQLite format 3\000"
+    return file_content.startswith(b'SQLite format 3\000')
+
+def generate_schema_hint(db_id: Optional[str] = None) -> str:
+    """Generate schema hint for the AI model"""
+    if db_id is None:
+        # Return the original Sakila schema
+        return SCHEMA_HINT
+    
+    info = load_database_info(db_id)
+    if not info:
+        return SCHEMA_HINT
+    
+    schema_info = info['schema_info']['schema']
+    hint_lines = ["-- Tables (SQLite Database - Complete Schema):\n"]
+    
+    for table_name, table_info in schema_info.items():
+        columns = [col['name'] for col in table_info['columns']]
+        hint_lines.append(f"-- {table_name}({', '.join(columns)})\n")
+    
+    hint_lines.extend([
+        "-- Rules:\n",
+        "-- - Use only existing columns.\n",
+        "-- - Prefer explicit INNER JOINs, GROUP BY actual selected non-aggregates.\n",
+        "-- - Use single quotes for string literals.\n",
+        "-- - For table counts, use sqlite_master to get all tables.\n"
+    ])
+    
+    return ''.join(hint_lines)
+
 BLOCKED = [
     'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE', 'ATTACH', 'DETACH', 'PRAGMA'
 ]
@@ -155,8 +297,9 @@ def strip_code_fences(text: str) -> str:
     return t
 
 
-def to_sql(nl_query: str) -> str:
-    prompt = f"{SYSTEM_PROMPT}\n{SCHEMA_HINT}\n{FEW_SHOT}\nNL: {nl_query}\nSQL:"
+def to_sql(nl_query: str, database_id: Optional[str] = None) -> str:
+    schema_hint = generate_schema_hint(database_id)
+    prompt = f"{SYSTEM_PROMPT}\n{schema_hint}\n{FEW_SHOT}\nNL: {nl_query}\nSQL:"
     text = call_gemini_with_retry(prompt)
     text = strip_code_fences(text)
     return text.rstrip(' ;')
@@ -187,8 +330,23 @@ Please provide a clear, concise explanation of what the results mean in the cont
         return f"Error generating explanation: {str(e)}"
 
 
-def ai_correct_sql_error(query: str, sql: str, error_msg: str, attempt: int = 1) -> str:
+def ai_correct_sql_error(query: str, sql: str, error_msg: str, database_id: Optional[str] = None, attempt: int = 1) -> str:
     """Use Gemini AI to correct SQL errors"""
+    
+    # Get the appropriate schema information
+    if database_id is None:
+        schema_text = "Database Schema (SQLite Sakila):\n- actor(actor_id, first_name, last_name, last_update)\n- address(address_id, address, address2, district, city_id, postal_code, phone, last_update)\n- category(category_id, name, last_update)\n- city(city_id, city, country_id, last_update)\n- country(country_id, country, last_update)\n- customer(customer_id, store_id, first_name, last_name, email, address_id, active, create_date, last_update)\n- film(film_id, title, description, release_year, language_id, original_language_id, rental_duration, rental_rate, length, replacement_cost, rating, special_features, last_update)\n- film_actor(actor_id, film_id, last_update)\n- film_category(film_id, category_id, last_update)\n- film_text(film_id, title, description)\n- inventory(inventory_id, film_id, store_id, last_update)\n- language(language_id, name, last_update)\n- payment(payment_id, customer_id, staff_id, rental_id, amount, payment_date, last_update)\n- rental(rental_id, rental_date, inventory_id, customer_id, return_date, staff_id, last_update)\n- staff(staff_id, first_name, last_name, address_id, picture, email, store_id, active, username, password, last_update)\n- store(store_id, manager_staff_id, address_id, last_update)"
+    else:
+        info = load_database_info(database_id)
+        if info:
+            schema_info = info['schema_info']['schema']
+            schema_lines = ["Database Schema (SQLite):"]
+            for table_name, table_info in schema_info.items():
+                columns = [col['name'] for col in table_info['columns']]
+                schema_lines.append(f"- {table_name}({', '.join(columns)})")
+            schema_text = "\n".join(schema_lines)
+        else:
+            schema_text = "Database Schema: Unable to load schema information"
     
     prompt = f"""You are a SQL expert. Fix the SQL query that has an error.
 
@@ -197,23 +355,7 @@ Failed SQL Query: {sql}
 Error Message: {error_msg}
 Attempt Number: {attempt}
 
-Database Schema (SQLite Sakila):
-- actor(actor_id, first_name, last_name, last_update)
-- address(address_id, address, address2, district, city_id, postal_code, phone, last_update)
-- category(category_id, name, last_update)
-- city(city_id, city, country_id, last_update)
-- country(country_id, country, last_update)
-- customer(customer_id, store_id, first_name, last_name, email, address_id, active, create_date, last_update)
-- film(film_id, title, description, release_year, language_id, original_language_id, rental_duration, rental_rate, length, replacement_cost, rating, special_features, last_update)
-- film_actor(actor_id, film_id, last_update)
-- film_category(film_id, category_id, last_update)
-- film_text(film_id, title, description)
-- inventory(inventory_id, film_id, store_id, last_update)
-- language(language_id, name, last_update)
-- payment(payment_id, customer_id, staff_id, rental_id, amount, payment_date, last_update)
-- rental(rental_id, rental_date, inventory_id, customer_id, return_date, staff_id, last_update)
-- staff(staff_id, first_name, last_name, address_id, picture, email, store_id, active, username, password, last_update)
-- store(store_id, manager_staff_id, address_id, last_update)
+{schema_text}
 
 Rules:
 - Return ONLY the corrected SQL query, no explanations
@@ -282,8 +424,9 @@ Rephrased Questions:"""
         return None
 
 
-def run_sql(sql: str):
-    conn = sqlite3.connect(DB_PATH)
+def run_sql(sql: str, database_id: Optional[str] = None):
+    db_path = get_database_path(database_id)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute(sql)
@@ -298,7 +441,7 @@ def run_sql(sql: str):
 async def query(nl: QueryIn):
     """AI-powered query processing with automatic error correction and retry logic"""
     max_attempts = 3
-    current_sql = to_sql(nl.query)
+    current_sql = to_sql(nl.query, nl.database_id)
     original_sql = current_sql
     correction_history = []
     
@@ -309,7 +452,7 @@ async def query(nl: QueryIn):
     for attempt in range(1, max_attempts + 1):
         try:
             # Try to execute the current SQL
-            result = run_sql(current_sql)
+            result = run_sql(current_sql, nl.database_id)
             
             # If successful, generate explanation and return
             explanation = generate_explanation(nl.query, current_sql, result.get("rows", []))
@@ -345,7 +488,7 @@ async def query(nl: QueryIn):
                 }
             
             # Use AI to correct the SQL error
-            corrected_sql = ai_correct_sql_error(nl.query, current_sql, error_msg, attempt)
+            corrected_sql = ai_correct_sql_error(nl.query, current_sql, error_msg, nl.database_id, attempt)
             
             if corrected_sql and corrected_sql != current_sql:
                 # Record the correction
@@ -363,7 +506,15 @@ async def query(nl: QueryIn):
                     if "total" in nl.query.lower() and "table" in nl.query.lower():
                         current_sql = "SELECT COUNT(*) as total_tables FROM sqlite_master WHERE type='table'"
                     else:
-                        current_sql = "SELECT 'actor' AS table_name, COUNT(*) AS row_count FROM actor UNION ALL SELECT 'address', COUNT(*) FROM address UNION ALL SELECT 'category', COUNT(*) FROM category UNION ALL SELECT 'city', COUNT(*) FROM city UNION ALL SELECT 'country', COUNT(*) FROM country UNION ALL SELECT 'customer', COUNT(*) FROM customer UNION ALL SELECT 'film', COUNT(*) FROM film UNION ALL SELECT 'film_actor', COUNT(*) FROM film_actor UNION ALL SELECT 'film_category', COUNT(*) FROM film_category UNION ALL SELECT 'film_text', COUNT(*) FROM film_text UNION ALL SELECT 'inventory', COUNT(*) FROM inventory UNION ALL SELECT 'language', COUNT(*) FROM language UNION ALL SELECT 'payment', COUNT(*) FROM payment UNION ALL SELECT 'rental', COUNT(*) FROM rental UNION ALL SELECT 'staff', COUNT(*) FROM staff UNION ALL SELECT 'store', COUNT(*) FROM store"
+                        # Get available tables for the specific database
+                        db_path = get_database_path(nl.database_id)
+                        try:
+                            schema_info = get_database_schema(db_path)
+                            tables = schema_info['tables']
+                            union_parts = [f"SELECT '{table}' AS table_name, COUNT(*) AS row_count FROM {table}" for table in tables]
+                            current_sql = " UNION ALL ".join(union_parts)
+                        except:
+                            current_sql = "SELECT COUNT(*) as result FROM sqlite_master WHERE type='table'"
                     
                     correction_history.append({
                         "attempt": attempt,
@@ -374,7 +525,7 @@ async def query(nl: QueryIn):
                     })
                 else:
                     # Generic fallback
-                    current_sql = "SELECT COUNT(*) as result FROM film LIMIT 1"
+                    current_sql = "SELECT COUNT(*) as result FROM sqlite_master WHERE type='table' LIMIT 1"
                     correction_history.append({
                         "attempt": attempt,
                         "error": error_msg,
@@ -385,3 +536,115 @@ async def query(nl: QueryIn):
     
     # This should never be reached, but just in case
     return {"error": "Unexpected error in query processing", "sql": current_sql}
+
+@app.post('/upload-database', response_model=DatabaseUploadResponse)
+async def upload_database(file: UploadFile = File(...)):
+    """Upload a SQLite database file"""
+    
+    # Validate file type
+    if not file.filename.lower().endswith(('.db', '.sqlite', '.sqlite3')):
+        raise HTTPException(status_code=400, detail="Only SQLite database files (.db, .sqlite, .sqlite3) are allowed")
+    
+    # Read file content
+    content = await file.read()
+    
+    # Validate SQLite format
+    if not validate_sqlite_file(content):
+        raise HTTPException(status_code=400, detail="Invalid SQLite database file")
+    
+    # Generate database ID
+    db_id = generate_database_id(file.filename, content)
+    
+    # Check if database already exists
+    if load_database_info(db_id):
+        info = load_database_info(db_id)
+        return DatabaseUploadResponse(
+            database_id=db_id,
+            name=info['name'],
+            tables=info['schema_info']['tables'],
+            message="Database already exists and is ready to use"
+        )
+    
+    # Save the database file
+    db_path = os.path.join(UPLOADED_DBS_DIR, f"{db_id}.db")
+    with open(db_path, 'wb') as f:
+        f.write(content)
+    
+    try:
+        # Extract schema information
+        schema_info = get_database_schema(db_path)
+        
+        # Save database info to cache
+        save_database_info(db_id, file.filename, schema_info)
+        
+        return DatabaseUploadResponse(
+            database_id=db_id,
+            name=file.filename,
+            tables=schema_info['tables'],
+            message="Database uploaded successfully"
+        )
+    
+    except Exception as e:
+        # Clean up on error
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        raise HTTPException(status_code=500, detail=f"Error processing database: {str(e)}")
+
+@app.get('/databases', response_model=List[DatabaseInfo])
+async def list_databases():
+    """List all uploaded databases"""
+    databases = list_uploaded_databases()
+    
+    # Add default Sakila database if it exists
+    if os.path.exists(DEFAULT_DB_PATH):
+        try:
+            schema_info = get_database_schema(DEFAULT_DB_PATH)
+            sakila_info = DatabaseInfo(
+                id="sakila",
+                name="Sakila (Default)",
+                tables=schema_info['tables'],
+                upload_date="Built-in",
+                file_size=os.path.getsize(DEFAULT_DB_PATH)
+            )
+            databases.insert(0, sakila_info)
+        except:
+            pass
+    
+    return databases
+
+@app.delete('/databases/{database_id}')
+async def delete_database(database_id: str):
+    """Delete an uploaded database"""
+    if database_id == "sakila":
+        raise HTTPException(status_code=400, detail="Cannot delete the default Sakila database")
+    
+    db_path = get_database_path(database_id)
+    cache_file = os.path.join(SCHEMA_CACHE_DIR, f"{database_id}.json")
+    
+    if not os.path.exists(db_path) and not os.path.exists(cache_file):
+        raise HTTPException(status_code=404, detail="Database not found")
+    
+    # Remove files
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+    
+    return {"message": "Database deleted successfully"}
+
+@app.get('/databases/{database_id}/schema')
+async def get_database_schema_endpoint(database_id: str):
+    """Get schema information for a specific database"""
+    if database_id == "sakila":
+        db_path = DEFAULT_DB_PATH
+    else:
+        info = load_database_info(database_id)
+        if not info:
+            raise HTTPException(status_code=404, detail="Database not found")
+        db_path = get_database_path(database_id)
+    
+    try:
+        schema_info = get_database_schema(db_path)
+        return schema_info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading database schema: {str(e)}")

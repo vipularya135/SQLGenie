@@ -1,0 +1,120 @@
+{
+  "id": "sample_company_37182050",
+  "name": "sample_company.db",
+  "schema_info": {
+    "tables": [
+      "employees",
+      "departments",
+      "projects"
+    ],
+    "schema": {
+      "employees": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "INTEGER",
+            "notnull": 0,
+            "pk": 1
+          },
+          {
+            "name": "name",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "department",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "salary",
+            "type": "REAL",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "hire_date",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          }
+        ],
+        "row_count": 5
+      },
+      "departments": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "INTEGER",
+            "notnull": 0,
+            "pk": 1
+          },
+          {
+            "name": "name",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "manager_id",
+            "type": "INTEGER",
+            "notnull": 0,
+            "pk": 0
+          },
+          {
+            "name": "budget",
+            "type": "REAL",
+            "notnull": 1,
+            "pk": 0
+          }
+        ],
+        "row_count": 3
+      },
+      "projects": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "INTEGER",
+            "notnull": 0,
+            "pk": 1
+          },
+          {
+            "name": "name",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "department_id",
+            "type": "INTEGER",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "start_date",
+            "type": "TEXT",
+            "notnull": 1,
+            "pk": 0
+          },
+          {
+            "name": "end_date",
+            "type": "TEXT",
+            "notnull": 0,
+            "pk": 0
+          },
+          {
+            "name": "budget",
+            "type": "REAL",
+            "notnull": 1,
+            "pk": 0
+          }
+        ],
+        "row_count": 4
+      }
+    }
+  },
+  "upload_date": "1759675780.7152777",
+  "file_size": 20480
+}
