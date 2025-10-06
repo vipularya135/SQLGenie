@@ -1,6 +1,10 @@
-# SQLGenie - AI-Powered Natural Language to SQL Converter with Dynamic Database Support
-Transform your natural language questions into perfect SQL queries with intelligent error correction and smart suggestions. Upload your own SQLite databases or use the built-in Sakila sample database.
-## Features
+# SQLGenie - AI-Powered Natural Language to SQL Converter with MCP Integration
+
+Transform your natural language questions into perfect SQL queries with intelligent error correction and smart suggestions. Now with **Claude Desktop integration** through Model Context Protocol (MCP)!
+
+## 🚀 Features
+
+### Core Features
 - **🗂️ Dynamic Database Support** - Upload your own SQLite database files (.db, .sqlite, .sqlite3)
 - **🧠 Automatic Schema Discovery** - Automatically extracts and caches database schema information
 - **📚 Database Management** - List, select, and delete uploaded databases
@@ -12,42 +16,258 @@ Transform your natural language questions into perfect SQL queries with intellig
 - **Correction history tracking** - See exactly how the AI fixed your query
 - **💡 Smart question rephrasing** - AI suggests better ways to ask questions when corrections fail
 - **🔄 API Key Rotation** - Automatically switches between multiple Gemini API keys on rate limits
-- **Technical error visibility** (shows actual error messages for debugging)
-- Interactive web interface with Streamlit
-- FastAPI backend for processing queries
-- Built-in examples and query history
-- CSV export functionality
-## Setup
-1. Install dependencies:
+
+### New: MCP Integration 🆕
+- **🤖 Claude Desktop Integration** - Direct database access through Claude Desktop
+- **🗣️ Natural Language Interface** - Ask Claude about your databases in plain English
+- **🔒 Secure Read-Only Access** - Safe database exploration with built-in protections
+- **⚡ Real-Time Schema Discovery** - Claude can explore your database structure instantly
+- **🆓 Completely Free** - No additional API costs when using Claude Desktop
+
+## 📁 Project Structure
+
+```
+SQLGenie/
+├── 📄 Core Application Files
+│   ├── app.py              # Streamlit frontend
+│   ├── main.py             # FastAPI backend
+│   ├── mcp_server.py       # MCP server for Claude Desktop
+│   └── requirements.txt    # Python dependencies
+│
+├── 📊 data/                # Database and data files
+│   ├── sakila.db          # Sample database
+│   ├── sample_company.sql # SQL dump file
+│   ├── uploaded_databases/ # User uploaded databases
+│   └── schema_cache/      # Cached database schemas
+│
+├──  docs/               # Documentation
+│   └── MCP_INTEGRATION_GUIDE.md # Complete MCP setup guide
+│
+└── 🔄 Environment
+    └── .venv/             # Virtual environment
+```
+
+## ⚡ Quick Start
+
+### Option 1: Use with Claude Desktop (Recommended)
+
+1. **Install Dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
-## Running the Application
-### Option 1: Use the startup script (Recommended)
-Double-click `start.bat` or run `start.ps1` in PowerShell
-### Option 2: Manual startup
-1. Start the backend server:
-   ```bash
-   uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+
+2. **Configure Claude Desktop:**
+   
+   Find your Claude Desktop config file:
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Linux: `~/.config/Claude/claude_desktop_config.json`
+
+   Add this configuration (update the path to match your project location):
+   ```json
+   {
+     "mcpServers": {
+       "sqlgenie": {
+         "command": "python",
+         "args": ["C:\\Users\\krish\\OneDrive\\Desktop\\sharp\\mcp_server.py"],
+         "env": {
+           "PYTHONPATH": "C:\\Users\\krish\\OneDrive\\Desktop\\sharp"
+         }
+       }
+     }
+   }
    ```
-2. In a new terminal, start the frontend:
+
+3. **Start MCP Server:**
    ```bash
-   streamlit run app.py --server.port 8501
+   python mcp_server.py
    ```
-## Usage
-1. Open your browser and go to `http://localhost:8501`
-2. **Upload a Database** (optional):
-   - Click "Browse files" in the sidebar under "Upload Database"
-   - Select a SQLite database file (.db, .sqlite, .sqlite3)
-   - Click "Upload Database" to process and cache the database
-3. **Select a Database**:
-   - Choose from uploaded databases or use the default Sakila database
-   - View table information for the selected database
-4. Enter a natural language query in the text box
-5. Click "🔮 Generate SQL" to execute the query
-6. View the generated SQL, natural language explanation, and results
-7. Download results as CSV if needed
-8. **Manage Databases**: Delete uploaded databases when no longer needed
+
+4. **Restart Claude Desktop** and start chatting with your databases!
+
+### Option 2: Use Web Interface
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Start Backend (Terminal 1):**
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+3. **Start Frontend (Terminal 2):**
+   ```bash
+   streamlit run app.py
+   ```
+
+4. **Open browser:** `http://localhost:8501`
+
+## 💬 Usage Examples
+
+### With Claude Desktop
+```
+"What databases do I have available?"
+"Show me the schema of the sakila database"
+"Find all customers from California in the sakila database"
+"What are the most popular movie categories?"
+"Analyze rental patterns in my database"
+```
+
+### With Web Interface
+1. Upload a database or use the built-in Sakila database
+2. Enter natural language queries like:
+   - "Show me all customers from California"
+   - "What are the top 5 most rented movies?"
+   - "Find all overdue rentals"
+
+## 🔧 Technical Details
+
+### MCP Integration
+- **Server:** `mcp_server.py` provides 4 MCP tools for database operations
+- **Security:** Read-only access, query limits, input validation
+- **Performance:** Result limits (1000 rows), query timeouts (30s)
+
+### Web Application
+- **Frontend:** Streamlit with file upload and result visualization
+- **Backend:** FastAPI with automatic error correction
+- **AI:** Google Gemini with multi-key rotation for reliability
+
+## 🛠️ Development Commands
+
+### Testing MCP Server
+```bash
+# Test MCP server functionality
+python -c "
+import subprocess
+import sys
+import time
+
+# Start MCP server test
+process = subprocess.Popen([sys.executable, 'mcp_server.py'], 
+                          stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, 
+                          stderr=subprocess.PIPE)
+time.sleep(2)
+if process.poll() is None:
+    print('✅ MCP server started successfully')
+    process.terminate()
+else:
+    print('❌ MCP server failed to start')
+"
+```
+
+### Environment Setup
+```bash
+# Create virtual environment (optional)
+python -m venv .venv
+
+# Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## 🛠️ Troubleshooting
+
+### MCP Issues
+- Ensure Claude Desktop config file has correct paths
+- Check that all dependencies are installed: `pip install -r requirements.txt`
+- Verify MCP server starts without errors: `python mcp_server.py`
+- Restart Claude Desktop after configuration changes
+
+### Web Interface Issues
+- Verify ports 8000 and 8501 are available
+- Check that database files exist in `data/` folder
+- Ensure Gemini API keys are valid in `main.py`
+
+### Database Path Issues
+- Database files should be in the `data/` folder
+- Check that `data/sakila.db` exists
+- Verify `data/uploaded_databases/` directory permissions
+
+## 📖 Documentation
+
+- **Complete MCP Guide:** `docs/MCP_INTEGRATION_GUIDE.md`
+- **API Documentation:** Available at `http://localhost:8000/docs` when backend is running
+- **Example Queries:** Built into the web interface
+
+## 🤝 Contributing
+
+Feel free to contribute by:
+- Adding new MCP tools
+- Improving database support  
+- Enhancing the AI query generation
+- Adding new database formats
+
+---
+
+**Transform your database interactions with AI! 🚀**
+
+## 💬 Usage Examples
+
+### With Claude Desktop
+```
+"What databases do I have available?"
+"Show me the schema of the sakila database"
+"Find all customers from California in the sakila database"
+"What are the most popular movie categories?"
+"Analyze rental patterns in my database"
+```
+
+### With Web Interface
+1. Upload a database or use the built-in Sakila database
+2. Enter natural language queries like:
+   - "Show me all customers from California"
+   - "What are the top 5 most rented movies?"
+   - "Find all overdue rentals"
+
+## 🔧 Technical Details
+
+### MCP Integration
+- **Server:** `mcp_server.py` provides 4 MCP tools for database operations
+- **Security:** Read-only access, query limits, input validation
+- **Performance:** Result limits (1000 rows), query timeouts (30s)
+
+### Web Application
+- **Frontend:** Streamlit with file upload and result visualization
+- **Backend:** FastAPI with automatic error correction
+- **AI:** Google Gemini with multi-key rotation for reliability
+
+## 📖 Documentation
+
+- **Complete MCP Guide:** `docs/MCP_INTEGRATION_GUIDE.md`
+- **API Documentation:** Available at `http://localhost:8000/docs` when running
+- **Example Queries:** Built into the web interface
+
+## 🛠️ Troubleshooting
+
+### MCP Issues
+- Run `.\scripts\test_mcp.py` to verify setup
+- Check Claude Desktop config: `%APPDATA%\Claude\claude_desktop_config.json`
+- Ensure all dependencies are installed
+
+### Web Interface Issues
+- Verify ports 8000 and 8501 are available
+- Check that database files exist in `data/` folder
+- Ensure Gemini API keys are valid
+
+## 🤝 Contributing
+
+Feel free to contribute by:
+- Adding new MCP tools
+- Improving database support
+- Enhancing the AI query generation
+- Adding new database formats
+
+---
+
+**Transform your database interactions with AI! 🚀**
 ### What You'll See
 - **🗂️ Database Management**: Upload, select, and delete SQLite databases
 - **📊 Schema Information**: View tables and structure for selected databases

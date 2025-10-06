@@ -11,9 +11,9 @@ from typing import Optional, Dict, List
 
 # Directory structure for database storage
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOADED_DBS_DIR = os.path.join(BASE_DIR, 'uploaded_databases')
-SCHEMA_CACHE_DIR = os.path.join(BASE_DIR, 'schema_cache')
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, 'sakila.db')
+UPLOADED_DBS_DIR = os.path.join(BASE_DIR, 'data', 'uploaded_databases')
+SCHEMA_CACHE_DIR = os.path.join(BASE_DIR, 'data', 'schema_cache')
+DEFAULT_DB_PATH = os.path.join(BASE_DIR, 'data', 'sakila.db')
 
 # Create directories if they don't exist
 os.makedirs(UPLOADED_DBS_DIR, exist_ok=True)

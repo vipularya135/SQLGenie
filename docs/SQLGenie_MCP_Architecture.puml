@@ -1,0 +1,122 @@
+@startuml SQLGenie_MCP_Architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 10
+skinparam packageStyle rectangle
+
+title SQLGenie MCP Integration Architecture
+
+!define LIGHTBLUE #E8F4FD
+!define LIGHTGREEN #E8F8E8
+!define LIGHTYELLOW #FFF8DC
+!define LIGHTGRAY #F5F5F5
+
+package "User Environment" as UserEnv {
+    actor User as user
+    
+    package "Claude Desktop" as ClaudeDesktop LIGHTBLUE {
+        component "Claude AI" as claude
+        component "MCP Client" as mcpClient
+        component "UI Interface" as ui
+        
+        claude --> mcpClient : uses
+        ui --> claude : user input
+        claude --> ui : responses
+    }
+    
+    package "VS Code Terminal" as VSCode LIGHTYELLOW {
+        component "Terminal" as term1
+        
+        note right of term1 : python mcp_server.py
+    }
+}
+
+package "SQLGenie MCP Application" as SQLGenieApp LIGHTGREEN {
+    
+    package "MCP Server Process" as MCPServer {
+        component "mcp_server.py" as mcpServer
+        component "DatabaseManager" as dbManager
+        component "MCP Tools Handler" as toolsHandler
+        
+        mcpServer --> dbManager : manages
+        mcpServer --> toolsHandler : handles requests
+    }
+    
+    package "Database Layer" as DatabaseLayer LIGHTGRAY {
+        database "data/sakila.db" as sakila
+        database "data/uploaded_databases/*.db" as uploaded
+        folder "data/schema_cache/" as cache
+        
+        cache --> sakila : caches schema
+        cache --> uploaded : caches schema
+    }
+}
+
+package "Configuration" as Config {
+    file "claude_desktop_config.json" as config
+    file "requirements.txt" as requirements
+    
+    note right of config : %APPDATA%/Claude/claude_desktop_config.json
+}
+
+' MCP Protocol Flow
+user --> ui : "What databases do I have?"
+ui --> claude : natural language
+claude --> mcpClient : interpret intent
+mcpClient --> mcpServer : MCP protocol\n(JSON-RPC over stdio)
+
+' MCP Tools Workflow
+mcpServer --> toolsHandler : route request
+toolsHandler --> dbManager : execute tool
+
+alt list_databases
+    dbManager --> sakila : scan
+    dbManager --> uploaded : scan
+    dbManager --> cache : read metadata
+    dbManager --> toolsHandler : return database list
+end
+
+alt get_database_schema
+    dbManager --> sakila : PRAGMA table_info()
+    dbManager --> uploaded : PRAGMA table_info()
+    dbManager --> cache : store/retrieve schema
+    dbManager --> toolsHandler : return schema info
+end
+
+alt execute_sql_query
+    toolsHandler --> toolsHandler : validate query\n(security checks)
+    dbManager --> sakila : SELECT query
+    dbManager --> uploaded : SELECT query
+    dbManager --> toolsHandler : return results\n(max 1000 rows)
+end
+
+alt analyze_query_results
+    toolsHandler --> toolsHandler : analyze data
+    toolsHandler --> toolsHandler : generate insights
+end
+
+' Response Flow
+toolsHandler --> mcpServer : tool response
+mcpServer --> mcpClient : MCP response\n(JSON-RPC)
+mcpClient --> claude : structured data
+claude --> ui : natural language response
+ui --> user : formatted answer
+
+' Configuration Setup
+config --> mcpClient : server connection\ndetails
+requirements --> mcpServer : dependencies
+
+' Terminal Management
+term1 --> mcpServer : runs
+
+' Security & Performance Notes
+note top of toolsHandler : MCP Security Features:\n• Read-only queries only\n• Query length limits (10,000 chars)\n• Result size limits (1000 rows)\n• Query timeout (30 seconds)\n• Input validation & sanitization\n• Dangerous operation blocking
+
+note bottom of dbManager : MCP Performance Features:\n• Schema caching for speed\n• Efficient SQLite connections\n• Result streaming\n• Memory management\n• Async operations
+
+note left of mcpServer : MCP Protocol Details:\n• JSON-RPC 2.0 over stdio\n• Tool-based architecture\n• Capability negotiation\n• Error standardization\n• Session management
+
+' MCP Tools Available
+note right of toolsHandler : Available MCP Tools:\n• list_databases\n• get_database_schema\n• execute_sql_query\n• analyze_query_results
+
+@enduml

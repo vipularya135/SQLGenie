@@ -1,0 +1,147 @@
+@startuml SQLGenie_MCP_DataFlow
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam roundcorner 15
+
+title SQLGenie MCP - Data Flow Architecture
+
+!define LIGHTBLUE #E8F4FD
+!define LIGHTGREEN #E8F8E8
+!define LIGHTYELLOW #FFF8DC
+!define LIGHTPINK #FFE8E8
+!define LIGHTGRAY #F5F5F5
+
+' External Entities
+rectangle "User" as user LIGHTBLUE
+rectangle "Claude Desktop" as claude LIGHTBLUE
+rectangle "VS Code Terminal" as terminal LIGHTYELLOW
+
+' Processes
+circle "1.0\nNatural Language\nProcessing" as nlp LIGHTGREEN
+circle "2.0\nMCP Protocol\nHandling" as mcp LIGHTGREEN
+circle "3.0\nTool\nDispatch" as dispatch LIGHTGREEN
+circle "4.0\nSecurity\nValidation" as security LIGHTPINK
+circle "5.0\nDatabase\nQuery" as dbquery LIGHTGREEN
+circle "6.0\nResult\nAnalysis" as analysis LIGHTGREEN
+circle "7.0\nResponse\nFormatting" as format LIGHTGREEN
+
+' Data Stores
+cylinder "D1\nSakila\nDatabase" as sakila_db LIGHTGRAY
+cylinder "D2\nUploaded\nDatabases" as user_db LIGHTGRAY
+cylinder "D3\nSchema\nCache" as cache LIGHTGRAY
+rectangle "D4\nConfiguration\nFiles" as config LIGHTGRAY
+
+' Data Flows
+user --> nlp : **DF1: Natural Language Query**\n"Show me customers from California"
+
+nlp --> claude : **DF2: Intent Recognition**\n{intent: "database_query",\ntarget: "customer_data",\nfilter: "California"}
+
+claude --> mcp : **DF3: MCP Tool Request**\n{"method": "tools/call",\n"name": "execute_sql_query",\n"args": {...}}
+
+mcp --> dispatch : **DF4: Parsed Tool Call**\n{tool: "execute_sql_query",\ndatabase_id: "sakila",\nquery: "SELECT ..."}
+
+dispatch --> security : **DF5: Raw Parameters**\n{database_id, query, options}
+
+security --> security : **DF6: Validation Results**\n{is_safe: true,\nsanitized_query: "...",\nlimits_applied: {...}}
+
+alt Query Validation Success
+    security --> dbquery : **DF7: Validated Request**\n{safe_query, connection_params}
+    
+    dbquery --> cache : **DF8: Schema Lookup**\n{database_id, table_names}
+    cache --> dbquery : **DF9: Cached Schema**\n{tables: {...}, relationships: {...}}
+    
+    alt Schema Cache Miss
+        dbquery --> sakila_db : **DF10a: Schema Query**\n"PRAGMA table_info(...)"
+        sakila_db --> dbquery : **DF11a: Schema Data**\n{columns, types, constraints}
+        dbquery --> cache : **DF12a: Cache Update**\n{schema_json, timestamp}
+    else Schema Cache Hit
+        note over cache : Use cached schema
+    end
+    
+    dbquery --> sakila_db : **DF13: Data Query**\n"SELECT c.first_name, c.last_name..."
+    sakila_db --> dbquery : **DF14: Raw Results**\n{rows: [...], metadata: {...}}
+    
+    dbquery --> user_db : **DF15: Alternative Query**\n(if different database selected)
+    user_db --> dbquery : **DF16: Alternative Results**
+    
+    dbquery --> analysis : **DF17: Query Results**\n{data: [...], query_info: {...}}
+    
+    analysis --> analysis : **DF18: Pattern Analysis**\n{insights: [...], statistics: {...}}
+    
+    analysis --> format : **DF19: Analyzed Results**\n{results: [...], insights: [...], summary: "..."}
+    
+else Query Validation Failure
+    security --> format : **DF20: Security Error**\n{error: "Dangerous operation",\nallowed_operations: [...]}
+end
+
+format --> mcp : **DF21: Formatted Response**\n{"success": true, "results": [...],\n"explanation": "Found 45 customers..."}
+
+mcp --> claude : **DF22: MCP Response**\n{tool_result: {...}, status: "success"}
+
+claude --> nlp : **DF23: AI Processing**\n{structured_data: [...], context: {...}}
+
+nlp --> user : **DF24: Natural Language Response**\n"I found 45 customers from California.\nHere are the results: [table]\nInsights: Most are from Los Angeles..."
+
+' Configuration flows
+config --> mcp : **DF25: Server Config**\n{connection_settings, tool_definitions}
+config --> security : **DF26: Security Rules**\n{allowed_operations, limits, timeouts}
+
+' Terminal monitoring
+terminal --> mcp : **DF27: Process Control**\n{start, stop, restart}
+mcp --> terminal : **DF28: Status Updates**\n{running, errors, logs}
+
+' Error handling flows
+security --> format : **DF29: Validation Errors**\n{sql_errors, security_violations}
+dbquery --> format : **DF30: Database Errors**\n{connection_errors, query_failures}
+analysis --> format : **DF31: Analysis Warnings**\n{large_result_sets, performance_hints}
+
+' Performance monitoring
+dbquery --> cache : **DF32: Performance Metrics**\n{query_time, result_size, cache_hits}
+cache --> analysis : **DF33: Usage Statistics**\n{access_patterns, performance_data}
+
+' Legend for data flow types
+note bottom
+**Data Flow Legend:**
+• **DF1-4:** User Interface Layer
+• **DF5-7:** Security & Validation
+• **DF8-16:** Database Operations
+• **DF17-19:** Analysis & Processing
+• **DF20-24:** Response Generation
+• **DF25-28:** Configuration & Control
+• **DF29-33:** Error Handling & Monitoring
+end note
+
+' Data store descriptions
+note right of sakila_db
+**Sakila Database:**
+• 16 tables
+• Movie rental domain
+• Sample data included
+• Read-only access
+end note
+
+note right of user_db
+**User Databases:**
+• Uploaded .db files
+• Custom schemas
+• Business data
+• Cached metadata
+end note
+
+note right of cache
+**Schema Cache:**
+• JSON metadata
+• Table structures
+• Relationships
+• Performance data
+end note
+
+note right of config
+**Configuration:**
+• claude_desktop_config.json
+• Security policies
+• Connection settings
+• Tool definitions
+end note
+
+@enduml

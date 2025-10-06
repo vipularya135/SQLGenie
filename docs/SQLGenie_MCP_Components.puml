@@ -1,0 +1,219 @@
+@startuml SQLGenie_MCP_Components
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+
+title SQLGenie MCP Server - Internal Component Architecture
+
+!define LIGHTBLUE #E8F4FD
+!define LIGHTGREEN #E8F8E8
+!define LIGHTYELLOW #FFF8DC
+!define LIGHTPINK #FFE8E8
+!define LIGHTGRAY #F5F5F5
+!define LIGHTCYAN #E0FFFF
+
+package "MCP Server Process" as MCPProcess LIGHTBLUE {
+    
+    package "MCP Protocol Layer" as MCPProtocol LIGHTCYAN {
+        component "stdio Server" as stdio {
+            port "stdin" as stdin
+            port "stdout" as stdout
+        }
+        component "JSON-RPC Handler" as jsonrpc
+        component "Message Router" as router
+        
+        stdin --> jsonrpc : raw input
+        jsonrpc --> router : parsed messages
+        router --> jsonrpc : responses
+        jsonrpc --> stdout : JSON output
+    }
+    
+    package "Tool Management" as ToolMgmt LIGHTYELLOW {
+        component "Tool Registry" as registry {
+            note right : list_databases\nget_database_schema\nexecute_sql_query\nanalyze_query_results
+        }
+        component "Tool Dispatcher" as dispatcher
+        component "Input Validator" as validator
+        component "Response Formatter" as formatter
+        
+        router --> dispatcher : tool calls
+        dispatcher --> registry : lookup tool
+        dispatcher --> validator : validate input
+        validator --> dispatcher : validated params
+        dispatcher --> formatter : raw results
+        formatter --> router : formatted response
+    }
+    
+    package "Database Management" as DBMgmt LIGHTGREEN {
+        component "DatabaseManager Class" as dbManager {
+            + load_databases()
+            + get_database_list()
+            + get_database_schema()
+            + execute_query()
+        }
+        
+        component "Schema Cache Manager" as schemaMgr {
+            + cache_schema()
+            + get_cached_schema()
+            + is_cache_valid()
+        }
+        
+        component "Connection Pool" as connPool {
+            + get_connection()
+            + return_connection()
+            + close_all()
+        }
+        
+        component "Query Executor" as queryExec {
+            + validate_query()
+            + execute_safe()
+            + format_results()
+            + apply_limits()
+        }
+        
+        dbManager --> schemaMgr : uses
+        dbManager --> connPool : manages
+        dbManager --> queryExec : delegates
+    }
+    
+    package "Security Layer" as Security LIGHTPINK {
+        component "Query Validator" as queryValidator {
+            + is_read_only()
+            + check_length()
+            + validate_syntax()
+            + block_dangerous()
+        }
+        
+        component "Input Sanitizer" as sanitizer {
+            + sanitize_input()
+            + escape_sql()
+            + validate_params()
+        }
+        
+        component "Rate Limiter" as rateLimiter {
+            + check_limits()
+            + update_counters()
+            + block_excess()
+        }
+        
+        component "Result Limiter" as resultLimiter {
+            + limit_rows()
+            + limit_size()
+            + timeout_protection()
+        }
+    }
+    
+    package "Analysis Engine" as Analysis LIGHTGRAY {
+        component "Result Analyzer" as analyzer {
+            + analyze_patterns()
+            + generate_insights()
+            + create_summary()
+        }
+        
+        component "Query Optimizer" as optimizer {
+            + suggest_improvements()
+            + add_indexes()
+            + optimize_joins()
+        }
+        
+        component "Error Handler" as errorHandler {
+            + parse_sql_errors()
+            + suggest_fixes()
+            + generate_help()
+        }
+    }
+}
+
+package "File System" as FileSystem {
+    folder "data/" as dataFolder {
+        file "sakila.db" as sakila
+        folder "uploaded_databases/" as uploadedDBs {
+            file "*.db files" as userDBs
+        }
+        folder "schema_cache/" as cache {
+            file "*.json files" as cacheFiles
+        }
+        file "sample_company.sql" as sqlDump
+    }
+}
+
+package "External Systems" as External {
+    component "Claude Desktop" as claude
+    database "SQLite Engine" as sqlite
+    component "Python Runtime" as python
+}
+
+' Protocol Flow
+claude --> stdin : MCP messages
+stdout --> claude : MCP responses
+
+' Tool Flow
+dispatcher --> dbManager : tool execution
+dbManager --> queryValidator : security check
+queryValidator --> sanitizer : input cleaning
+sanitizer --> queryExec : safe execution
+
+' Database Operations
+queryExec --> sqlite : SQL execution
+sqlite --> sakila : query data
+sqlite --> userDBs : query data
+schemaMgr --> cache : read/write
+schemaMgr --> cacheFiles : JSON files
+
+' Security Integration
+validator --> queryValidator : query validation
+validator --> sanitizer : input sanitization
+validator --> rateLimiter : rate checking
+queryExec --> resultLimiter : result limiting
+
+' Analysis Integration
+formatter --> analyzer : result analysis
+queryExec --> optimizer : query optimization
+queryValidator --> errorHandler : error handling
+
+' Error Flow
+errorHandler --> formatter : error responses
+analyzer --> formatter : insights
+optimizer --> formatter : suggestions
+
+' Configuration and Dependencies
+python --> stdio : runtime
+python --> sqlite : database engine
+python --> jsonrpc : JSON processing
+
+note as SecurityNote
+**Security Features:**
+• Query whitelist (SELECT, WITH, PRAGMA only)
+• Input sanitization & validation
+• Result size limits (1000 rows max)
+• Query timeout (30 seconds)
+• SQL injection prevention
+• Rate limiting protection
+end note
+
+note as PerformanceNote
+**Performance Features:**
+• Schema caching for faster access
+• Connection pooling
+• Async operations
+• Memory-efficient streaming
+• Query optimization hints
+• Result pagination
+end note
+
+note as ProtocolNote
+**MCP Protocol Details:**
+• JSON-RPC 2.0 over stdio
+• Tool-based architecture
+• Async request/response
+• Error standardization
+• Capability negotiation
+• Session management
+end note
+
+SecurityNote --> Security
+PerformanceNote --> DBMgmt
+ProtocolNote --> MCPProtocol
+
+@enduml
