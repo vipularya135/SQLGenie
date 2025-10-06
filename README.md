@@ -24,7 +24,7 @@ Transform your natural language questions into perfect SQL queries with intellig
    ```
 ## Running the Application
 ### Option 1: Use the startup script (Recommended)
-Double-click `start.bat` or run `start.ps1` in PowerShell.
+Double-click `start.bat` or run `start.ps1` in PowerShell
 ### Option 2: Manual startup
 1. Start the backend server:
    ```bash
