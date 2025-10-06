@@ -1,0 +1,47 @@
+@startuml SQLGenie_Comparison_Flow
+!theme plain
+title SQLGenie - MCP vs non MCP Comparison
+
+package "MCP Integration (Claude AI)" as MCP {
+    actor "User" as user1
+    component "Claude Desktop" as claude
+    component "MCP Server" as mcpserver
+    database "SQLite DB" as db1
+    
+    user1 -> claude : "Show customers from CA"
+    claude -> mcpserver : MCP tool call
+    mcpserver -> db1 : SELECT query
+    db1 -> mcpserver : Results
+    mcpserver -> claude : Data + insights
+    claude -> user1 : Conversational answer
+    
+    note bottom of claude : FREE\nContextual memory\nBuilt-in security
+}
+
+package "Web Interface (Gemini)" as WEB {
+    actor "User" as user2
+    component "Browser" as browser
+    component "Streamlit" as streamlit
+    component "FastAPI" as fastapi
+    component "Gemini API" as gemini
+    database "SQLite DB" as db2
+    
+    user2 -> browser : Enter query
+    browser -> streamlit : Form submit
+    streamlit -> fastapi : api
+    fastapi -> gemini : Generate SQL
+    gemini -> fastapi : SQL query
+    fastapi -> db2 : Execute SQL
+    db2 -> fastapi : Results
+    fastapi -> streamlit : Data
+    streamlit -> browser : Table display
+    browser -> user2 : Web page
+    
+    note bottom of gemini : PAID\nStateless\nCustom security
+}
+
+note top of MCP : Advantages:\n• Completely free\n• Natural conversation\n• Context awareness\n• Built-in safety
+
+note top of WEB : Advantages:\n• Web interface\n• Full SQL control\n• Familiar UI\n• Custom features
+
+@enduml

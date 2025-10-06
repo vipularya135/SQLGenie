@@ -1,0 +1,44 @@
+@startuml SQLGenie_MCP_Capabilities
+!theme plain
+skinparam usecase {
+    BackgroundColor LightBlue
+    BorderColor DarkBlue
+}
+
+title SQLGenie MCP -  Tools
+
+actor "Claude Desktop" as claude
+
+package "MCP Tools" {
+    usecase "list_databases" as tool1
+    usecase "get_database_schema" as tool2  
+    usecase "execute_sql_query" as tool3
+    usecase "analyze_query_results" as tool4
+}
+
+claude --> tool1
+claude --> tool2
+claude --> tool3
+claude --> tool4
+
+note top of tool1
+Get all available databases
+with table counts and sizes
+end note
+
+note top of tool2
+Shows columns, types,
+foreign keys, indexes
+end note
+
+note bottom of tool3
+Read-only queries only
+Max 1000 rows, 30s timeout
+end note
+
+note bottom of tool4
+Analyzes patterns, statistics,
+and generates summaries
+end note
+
+@enduml

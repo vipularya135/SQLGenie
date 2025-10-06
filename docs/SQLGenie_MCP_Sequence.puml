@@ -1,169 +1,19 @@
 @startuml SQLGenie_MCP_Sequence_Workflow
-!theme plain
-skinparam backgroundColor #FFFFFF
-skinparam sequenceArrowThickness 2
-skinparam roundcorner 20
-skinparam maxmessagesize 60
+title MCP Sequence - Simple Flow
 
-title SQLGenie MCP Integration - Detailed Sequence Workflow
+actor User
+participant "Claude Desktop" as Claude
+participant "MCP Server" as Server
+participant "Database" as DB
 
-actor User as user
-participant "Claude Desktop\nUI" as ui
-participant "Claude AI\nEngine" as claude
-participant "MCP Client" as mcpClient
-participant "mcp_server.py" as mcpServer
-participant "DatabaseManager" as dbManager
-participant "SQLite Database" as db
-participant "Schema Cache" as cache
+User -> Claude : "Show me customers from California"
+Claude -> Server : MCP tool call (execute_sql_query)
+Server -> Server : Validate query (security)
+Server -> DB : SELECT query
+DB -> Server : Results
+Server -> Claude : Data + insights
+Claude -> User : "Found 45 customers..."
 
-== MCP Server Initialization ==
-
-note over user : User starts MCP server:\npython mcp_server.py
-
-mcpServer -> mcpServer : Initialize DatabaseManager
-mcpServer -> db : Scan data/sakila.db
-mcpServer -> db : Scan data/uploaded_databases/
-mcpServer -> cache : Load cached schemas
-mcpServer -> mcpServer : **MCP Server Ready**\nListening on stdio
-
-note over mcpServer : Server waiting for\nClaude Desktop connections
-
-== Claude Desktop Connection ==
-
-user -> ui : Opens Claude Desktop
-ui -> claude : Initialize session
-claude -> mcpClient : Load MCP servers from config
-mcpClient -> mcpServer : **MCP Initialize Request**\n{"jsonrpc": "2.0", "method": "initialize"}
-mcpServer -> mcpClient : **Initialize Response**\n{"capabilities": {"tools": {...}}}
-mcpClient -> mcpServer : **List Tools Request**\n{"method": "tools/list"}
-mcpServer -> mcpClient : **Available Tools Response**\n["list_databases", "get_database_schema",\n"execute_sql_query", "analyze_query_results"]
-
-note over claude, mcpServer : **MCP Connection Established**
-
-== User Query: "What databases do I have?" ==
-
-user -> ui : **"What databases do I have available?"**
-ui -> claude : Natural language input
-claude -> claude : **Intent Analysis:**\n"User wants to see available databases"
-
-claude -> mcpClient : **Tool Selection Decision**
-mcpClient -> mcpServer : **MCP Tool Call**\n{"method": "tools/call",\n"params": {"name": "list_databases", "arguments": {}}}
-
-mcpServer -> dbManager : **list_databases()**
-dbManager -> db : Check data/sakila.db exists
-db -> dbManager : ✓ Found (5.8MB)
-dbManager -> db : Scan data/uploaded_databases/
-db -> dbManager : ✓ Found sample_company.db
-dbManager -> cache : Read cached metadata
-cache -> dbManager : Schema info & table counts
-
-dbManager -> mcpServer : **Database List**\n[{"id": "sakila", "name": "Sakila Database",\n"tables": 16, "size": "5.8MB"},\n{"id": "sample_company", "tables": 5}]
-mcpServer -> mcpClient : **MCP Tool Response**\n{"result": {"databases": [...], "total_count": 2}}
-mcpClient -> claude : Structured database data
-
-claude -> claude : **Format User Response**
-claude -> ui : **"You have 2 databases available:\n\n1. **Sakila Database** (16 tables) - Movie rental sample\n2. **Sample Company** (5 tables) - Business data\n\nWould you like to explore any of these?"**
-ui -> user : Display formatted response
-
-== User Query: "Show me the Sakila database schema" ==
-
-user -> ui : **"Show me the structure of the sakila database"**
-ui -> claude : Natural language input
-claude -> claude : **Intent Analysis:**\n"User wants detailed schema for sakila"
-
-claude -> mcpClient : **Tool Selection Decision**
-mcpClient -> mcpServer : **MCP Tool Call**\n{"method": "tools/call",\n"params": {"name": "get_database_schema",\n"arguments": {"database_id": "sakila"}}}
-
-mcpServer -> dbManager : **get_database_schema("sakila")**
-dbManager -> cache : Check cached schema for sakila
-cache -> dbManager : Cache valid (less than 24h old)
-
-alt Schema Cache Hit
-    cache -> dbManager : **Complete Schema Data**\n{"tables": {"actor": {...}, "film": {...}}}
-else Schema Cache Miss
-    dbManager -> db : **PRAGMA table_info(actor)**
-    db -> dbManager : actor_id, first_name, last_name, last_update
-    dbManager -> db : **PRAGMA table_info(film)**
-    db -> dbManager : film_id, title, description, release_year...
-    dbManager -> db : **PRAGMA foreign_key_list(rental)**
-    db -> dbManager : customer_id -> customer(customer_id)
-    
-    loop for each table (16 tables)
-        dbManager -> db : Get table structure & relationships
-        db -> dbManager : Column details + foreign keys
-    end
-    
-    dbManager -> cache : **Store complete schema**
-    cache -> dbManager : ✓ Cached with timestamp
-end
-
-dbManager -> mcpServer : **Complete Schema Response**\n{"database_id": "sakila",\n"tables": {...}, "relationships": {...}}
-
-mcpServer -> mcpClient : **MCP Tool Response**\n{"result": {"schema": {...}}}
-mcpClient -> claude : Structured schema data
-
-claude -> claude : **Analyze & Format Schema**
-claude -> ui : **"The Sakila database contains 16 interconnected tables:\n\n**Core Tables:**\n• **actor** (4 columns) - Actor information\n• **film** (13 columns) - Movie details\n• **customer** (8 columns) - Customer data\n• **rental** (7 columns) - Rental transactions\n\n**Relationships:**\n• Films have actors (film_actor junction)\n• Customers make rentals\n• Rentals involve inventory items\n\nWould you like to query any of this data?"**
-ui -> user : Display schema overview
-
-== User Query: "Find customers from California" ==
-
-user -> ui : **"Find all customers from California"**
-ui -> claude : Natural language input
-claude -> claude : **SQL Generation:**\n"Need to join customer, address, city, country\nto filter by state/country"
-
-claude -> mcpClient : **Tool Selection Decision**
-mcpClient -> mcpServer : **MCP Tool Call**\n{"method": "tools/call",\n"params": {"name": "execute_sql_query",\n"arguments": {"database_id": "sakila",\n"query": "SELECT c.first_name, c.last_name, a.address, ci.city\nFROM customer c\nJOIN address a ON c.address_id = a.address_id\nJOIN city ci ON a.city_id = ci.city_id\nJOIN country co ON ci.country_id = co.country_id\nWHERE co.country = 'United States'\nAND a.district LIKE '%California%'"}}}
-
-mcpServer -> dbManager : **execute_query("sakila", sql)**
-dbManager -> dbManager : **Security Validation**\n• ✓ Read-only query (SELECT)\n• ✓ Query length < 10,000 chars\n• ✓ No dangerous operations\n• ✓ Valid syntax
-
-dbManager -> db : **Execute Query**\n"SELECT c.first_name, c.last_name..."
-db -> dbManager : **Query Results**\n[{"first_name": "Mary", "last_name": "Smith",\n"address": "1913 Hanoi Way", "city": "Sasebo"},\n{"first_name": "Patricia", ...}, ...]
-
-dbManager -> dbManager : **Apply Result Limits**\n• Limit to 1000 rows max\n• Check result size
-
-dbManager -> mcpServer : **Query Results**\n{"success": true, "results": [...],\n"row_count": 9, "columns": [...]}
-
-mcpServer -> mcpClient : **MCP Tool Response**
-mcpClient -> claude : Query results data
-
-claude -> mcpClient : **Follow-up Analysis**
-mcpClient -> mcpServer : **MCP Tool Call**\n{"method": "tools/call",\n"params": {"name": "analyze_query_results",\n"arguments": {"query": "...", "results": [...]}}}
-
-mcpServer -> dbManager : **analyze_query_results()**
-dbManager -> dbManager : **Generate Insights**\n• Count by city\n• Identify patterns\n• Create summary
-
-dbManager -> mcpServer : **Analysis Response**\n{"insights": "Found 9 customers in California",\n"patterns": ["Most from Los Angeles area"],\n"summary": "Customer distribution analysis"}
-
-mcpServer -> mcpClient : **Analysis Tool Response**
-mcpClient -> claude : Analysis data
-
-claude -> claude : **Combine Results + Analysis**
-claude -> ui : **"I found 9 customers from California:\n\n[Table showing customer details]\n\n**Insights:**\n• Most customers are in the Los Angeles area\n• Good geographic distribution\n• All have active rental history\n\nWould you like to see their rental patterns?"**
-ui -> user : Display results with insights
-
-== Security Example: Dangerous Query Blocked ==
-
-user -> ui : **"Delete all customer data"**
-ui -> claude : Natural language input
-claude -> claude : **SQL Generation:**\n"DELETE FROM customer" (dangerous!)
-
-claude -> mcpClient : **Tool Selection Decision**
-mcpClient -> mcpServer : **MCP Tool Call**\n{"method": "tools/call",\n"params": {"name": "execute_sql_query",\n"arguments": {"query": "DELETE FROM customer"}}}
-
-mcpServer -> dbManager : **execute_query(dangerous_sql)**
-dbManager -> dbManager : **Security Validation FAILED**\n• ❌ DELETE operation detected\n• ❌ Not in allowed operations\n• ❌ Potentially dangerous
-
-dbManager -> mcpServer : **Security Error**\n{"success": false,\n"error": "Dangerous operation blocked",\n"error_type": "SecurityError",\n"allowed_operations": ["SELECT", "WITH", "PRAGMA", "EXPLAIN"]}
-
-mcpServer -> mcpClient : **Error Response**
-mcpClient -> claude : Security error information
-
-claude -> claude : **Handle Security Limitation**
-claude -> ui : **"I can't perform DELETE operations for security.\nI'm restricted to read-only operations (SELECT queries).\n\nI can help you:\n• View customer data\n• Analyze customer patterns\n• Export customer information\n\nWould you like me to show you the customer data instead?"**
-ui -> user : Helpful security explanation
-
-note over user, db : **MCP Security Features:**\n• Read-only operations only\n• Query validation & sanitization\n• Result size limits (1000 rows)\n• Query timeout (30 seconds)\n• Dangerous operation blocking\n• Input length validation
+note right of Server : Security: Read-only only\nLimit: 1000 rows max\nTimeout: 30 seconds
 
 @enduml
